@@ -14,11 +14,13 @@ import (
 	"github.com/gordonklaus/portaudio"
 )
 
+// We still use these constants to define sampleRate=48k, 2 channels, etc.,
+// but note that for input, we actually only have 1 channel available (mono).
 const (
 	sampleRate      = 48000
-	channels        = 1
+	outputChannels  = 2 // For WAV/output
 	frameDurationMs = 20
-	framesPerBuffer = (sampleRate * frameDurationMs) / 1000 // 960 samples for 20ms at 48kHz
+	framesPerBuffer = (sampleRate * frameDurationMs) / 1000 // e.g., 960
 )
 
 const echoDelay = 300 * time.Millisecond
@@ -28,54 +30,55 @@ func main() {
 	if err := portaudio.Initialize(); err != nil {
 		log.Fatalf("Failed to initialize PortAudio: %v", err)
 	}
-	defer portaudio.Terminate()
+	// We’ll explicitly terminate in the signal handler.
 
-	// 2) Create a WAV file to record the raw microphone feed
+	// 2) Create/prepare the WAV file (2-channel)
 	wavFile, err := os.Create("recorded_mic.wav")
 	if err != nil {
 		log.Fatalf("Failed to create wav file: %v", err)
 	}
-	defer wavFile.Close()
 
-	// Set up the WAV encoder
 	enc := wav.NewEncoder(
 		wavFile,
 		sampleRate,
-		16, // bit depth
-		channels,
-		1, // WAV format (1 = PCM)
+		16, // 16-bit
+		outputChannels,
+		1, // WAV type (1 = PCM)
 	)
-	defer enc.Close()
 
-	// We'll store our raw PCM data in a buffer, then encode it chunk by chunk
-	// The echo is done separately, so the WAV file will not have the echo added.
+	// 3) Create the buffers
+	//    - micBufferMono for 1-channel input
+	//    - stereoBuffer to up-mix the mono samples to 2 channels
+	micBufferMono := make([]float32, framesPerBuffer)               // mono
+	stereoBuffer := make([]float32, framesPerBuffer*outputChannels) // 2x size
+
+	// This channel is how we pass frames to the speaker’s output callback
 	echoChan := make(chan []float32, 100)
-	micBuffer := make([]float32, framesPerBuffer)
 
-	// 3) Open default input (microphone)
+	// 4) Open a *mono* input stream (1 channel)
 	inStream, err := portaudio.OpenDefaultStream(
-		channels, // 1 input channel
-		0,        // no output
+		1, // mic: 1 channel
+		0, // no output
 		float64(sampleRate),
 		framesPerBuffer,
-		micBuffer,
+		micBufferMono, // read data into this mono buffer
 	)
 	if err != nil {
 		log.Fatalf("Failed to open input stream: %v", err)
 	}
-	defer inStream.Close()
 
-	// 4) Open default output (speaker) for echo
+	// 5) Open a *stereo* output stream (2 channels) for echo
 	outStream, err := portaudio.OpenDefaultStream(
-		0,        // no input
-		channels, // 1 output channel
+		0,              // no input
+		outputChannels, // 2 output channels
 		float64(sampleRate),
 		framesPerBuffer,
 		func(out []float32) {
-			// Attempt to read one frame from echoChan
+			// The output callback: copy from echoChan (if available) into out
 			select {
 			case delayedFrame := <-echoChan:
 				copy(out, delayedFrame)
+				// zero any leftover (usually none, but just in case)
 				for i := len(delayedFrame); i < len(out); i++ {
 					out[i] = 0
 				}
@@ -90,9 +93,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to open output stream: %v", err)
 	}
-	defer outStream.Close()
 
-	// 5) Start streams
+	// Start input/output streams
 	if err := inStream.Start(); err != nil {
 		log.Fatalf("Failed to start input stream: %v", err)
 	}
@@ -100,35 +102,34 @@ func main() {
 		log.Fatalf("Failed to start output stream: %v", err)
 	}
 
-	// Create an OS signal channel
+	// 6) Graceful shutdown on Ctrl+C
 	sigChan := make(chan os.Signal, 1)
-	// Notify on Interrupt (Ctrl+C) and SIGTERM
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
 	go func() {
-		// Wait for a signal
 		<-sigChan
-		log.Println("Caught Ctrl+C or SIGTERM, closing WAV file and streams...")
+		log.Println("Caught Ctrl+C or SIGTERM, closing streams and WAV file gracefully...")
 
-		// Stop PortAudio streams
+		// Stop/Close streams
 		inStream.Stop()
 		outStream.Stop()
+		inStream.Close()
+		outStream.Close()
 
-		// Properly close the WAV encoder/file
+		// Close WAV encoder and file
 		enc.Close()
 		wavFile.Close()
 
 		// Terminate PortAudio
 		portaudio.Terminate()
-
 		os.Exit(0)
 	}()
 
-	// 6) Goroutine: read mic frames, record them to WAV, schedule echo
+	// 7) Goroutine: read mic frames, up-mix to stereo, write WAV, schedule echo
 	go func() {
 		log.Println("Starting microphone capture + WAV record loop...")
 
 		for {
+			// Read a mono frame
 			if err := inStream.Read(); err != nil {
 				if errors.Is(err, portaudio.InputOverflowed) {
 					log.Println("PortAudio input overflowed, ignoring")
@@ -138,9 +139,20 @@ func main() {
 				return
 			}
 
-			// Convert float32 -> int (in 16-bit range) for wav encoding
-			intBuf := make([]int, len(micBuffer))
-			for i, sample := range micBuffer {
+			// Up-mix from mono => stereoBuffer
+			//   micBufferMono[i] -> stereoBuffer[2*i], stereoBuffer[2*i+1]
+			for i := 0; i < framesPerBuffer; i++ {
+				s := micBufferMono[i]
+				stereoBuffer[2*i] = s   // left
+				stereoBuffer[2*i+1] = s // right
+			}
+
+			//
+			// Write the stereoBuffer to our WAV
+			//
+			// Convert float32 -> 16-bit int range
+			intBuf := make([]int, len(stereoBuffer))
+			for i, sample := range stereoBuffer {
 				v := int(sample * 32767)
 				if v < -32768 {
 					v = -32768
@@ -150,23 +162,24 @@ func main() {
 				intBuf[i] = v
 			}
 
-			// Prepare an AudioBuffer
+			// Make an AudioBuffer for go-audio/wav
 			audioBuf := &audio.IntBuffer{
-				Format:         &audio.Format{NumChannels: channels, SampleRate: sampleRate},
+				Format:         &audio.Format{NumChannels: outputChannels, SampleRate: sampleRate},
 				SourceBitDepth: 16,
 				Data:           intBuf,
 			}
-			// Write to the WAV encoder
+
 			if err := enc.Write(audioBuf); err != nil {
-				log.Printf("Error writing wav data: %v", err)
+				log.Printf("Error writing WAV data: %v", err)
 				return
 			}
 
-			// Copy the mic buffer for echo
-			frameCopy := make([]float32, len(micBuffer))
-			copy(frameCopy, micBuffer)
+			//
+			// Schedule a 300 ms echo
+			//
+			frameCopy := make([]float32, len(stereoBuffer))
+			copy(frameCopy, stereoBuffer)
 
-			// Schedule echo
 			go func(data []float32) {
 				time.Sleep(echoDelay)
 				echoChan <- data
@@ -174,8 +187,6 @@ func main() {
 		}
 	}()
 
-	fmt.Println("Press Ctrl+C to stop. You'll hear 300 ms echo in speakers, while the raw mic is recorded to recorded_mic.wav...")
-
-	// Block forever
+	fmt.Println("Press Ctrl+C to stop. You'll hear a 300 ms stereo echo, while the raw mic is recorded to 'recorded_mic.wav'...")
 	select {}
 }
