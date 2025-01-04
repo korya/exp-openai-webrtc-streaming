@@ -9,7 +9,7 @@ import (
 	"github.com/pion/mediadevices/pkg/prop"
 )
 
-func getUserMediaTrack() (mediadevices.Track, error) {
+func getUserMediaTrack(sampleRate, channels int) (mediadevices.Track, error) {
 	opusParams := opus.Params{
 		Latency: opus.Latency20ms,
 	}
@@ -20,9 +20,9 @@ func getUserMediaTrack() (mediadevices.Track, error) {
 
 	audio, err := mediadevices.GetUserMedia(mediadevices.MediaStreamConstraints{
 		Audio: func(c *mediadevices.MediaTrackConstraints) {
-			c.SampleRate = prop.Int(48_000)
-			c.ChannelCount = prop.Int(2)
-			c.SampleSize = prop.Int(16)
+			c.SampleRate = prop.Int(sampleRate)
+			c.ChannelCount = prop.Int(channels)
+			c.SampleSize = prop.Int(16) // 16-bit
 		},
 		Codec: codecSelector,
 	})

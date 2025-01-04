@@ -28,7 +28,7 @@ func main() {
 	}
 	defer player.Close()
 
-	userMediaTrack, err := getUserMediaTrack()
+	userMediaTrack, err := getUserMediaTrack(sampleRate, channels)
 	if err != nil {
 		log.Fatalf("Failed to get user media tracks: %v\n", err)
 	}

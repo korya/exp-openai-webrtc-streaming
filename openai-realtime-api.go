@@ -109,7 +109,10 @@ func (c *OpenAIRealtimeAPI) setupPeerConnection(
 
 	// XXX explicitly ask for Opus to match the Ontrack callback
 	var mediaEngine webrtc.MediaEngine
-	mediaEngine.RegisterCodec(codec.NewRTPOpusCodec(48_000).RTPCodecParameters, webrtc.RTPCodecTypeAudio)
+	opusParams := codec.NewRTPOpusCodec(48_000).RTPCodecParameters
+	opusParams.ClockRate = sampleRate
+	opusParams.Channels = channels
+	mediaEngine.RegisterCodec(opusParams, webrtc.RTPCodecTypeAudio)
 	// mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 	// 	RTPCodecCapability: RTPCodecCapability{MimeTypeOpus, 48000, 2, "minptime=10;useinbandfec=1", nil},
 	// 	PayloadType:        111,

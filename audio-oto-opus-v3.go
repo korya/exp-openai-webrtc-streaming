@@ -15,10 +15,6 @@ type OpusV3AudioPlayer struct {
 	audioBuffer *audioBuffer
 	mutex       sync.Mutex
 	closed      bool
-
-	// Audio configuration
-	sampleRate int
-	channels   int
 }
 
 func NewOpusV3AudioPlayer() (*OpusV3AudioPlayer, error) {
@@ -34,7 +30,7 @@ func NewOpusV3AudioPlayer() (*OpusV3AudioPlayer, error) {
 	// Wait for the context to be ready
 	<-ready
 
-	audioBuffer := newAudioBuffer()
+	audioBuffer := newAudioBuffer(sampleRate, channels)
 
 	player := context.NewPlayer(audioBuffer)
 
@@ -42,8 +38,6 @@ func NewOpusV3AudioPlayer() (*OpusV3AudioPlayer, error) {
 		context:     context,
 		player:      player,
 		audioBuffer: audioBuffer,
-		sampleRate:  48000,
-		channels:    2,
 	}, nil
 }
 

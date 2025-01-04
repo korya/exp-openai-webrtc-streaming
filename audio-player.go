@@ -12,16 +12,17 @@ import (
 	"golang.org/x/exp/rand"
 )
 
+const (
+	sampleRate = 48_000 // 24kHz
+	channels   = 2      // stereo
+)
+
 type OpusV2AudioPlayer struct {
 	context     *oto.Context
 	player      *oto.Player
 	audioBuffer *audioBuffer
 	mutex       sync.Mutex
 	closed      bool
-
-	// Audio configuration
-	sampleRate int
-	channels   int
 }
 
 func NewOpusV2AudioPlayer() (*OpusV2AudioPlayer, error) {
@@ -29,7 +30,7 @@ func NewOpusV2AudioPlayer() (*OpusV2AudioPlayer, error) {
 		SampleRate:   sampleRate,
 		ChannelCount: channels,
 		Format:       oto.FormatSignedInt16LE,
-		BufferSize:   480, // 10ms buffer (lower for less latency)
+		BufferSize:   sampleRate / 100, // 10ms buffer (lower for less latency)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create audio context: %w", err)
@@ -38,7 +39,7 @@ func NewOpusV2AudioPlayer() (*OpusV2AudioPlayer, error) {
 	// Wait for the context to be ready
 	<-ready
 
-	audioBuffer := newAudioBuffer()
+	audioBuffer := newAudioBuffer(sampleRate, channels)
 	player := context.NewPlayer(audioBuffer)
 	// Try to set real-time priority if possible
 	if err := setRealtimePriority(); err != nil {
@@ -49,8 +50,6 @@ func NewOpusV2AudioPlayer() (*OpusV2AudioPlayer, error) {
 		context:     context,
 		player:      player,
 		audioBuffer: audioBuffer,
-		sampleRate:  48000,
-		channels:    2,
 	}, nil
 }
 
@@ -61,17 +60,20 @@ func (ap *OpusV2AudioPlayer) orig_WriteWebRTCTrack(track *webrtc.TrackRemote) er
 		return fmt.Errorf("unsupported codec: %s", track.Codec().MimeType)
 	}
 
-	decoder, err := opusv2.NewDecoder(ap.sampleRate, ap.channels)
+	sampleRate := int(codec.ClockRate)
+	channels := int(codec.Channels)
+	decoder, err := opusv2.NewDecoder(sampleRate, channels)
 	if err != nil {
 		return fmt.Errorf("failed to create opus decoder: %w", err)
 	}
 
 	ap.player.Play()
 
-	// Frame size for 20ms at 48kHz stereo
-	const frameSize = 960
-	pcmBuf := make([]int16, frameSize*2) // *2 for stereo
-	bsBuf := make([]byte, frameSize*2*2) // *2 for stereo, *2 for 16-bit samples
+	// Allocate PCM buffers at maximum size
+	frameSizeMs := 60 // for max frameSize
+	frameSize := int(float32(frameSizeMs) * float32(sampleRate) / 1000)
+	pcmBuf := make([]int16, frameSize*channels)
+	bsBuf := make([]byte, len(pcmBuf)*2) // *2 for 16-bit samples
 
 	for {
 		var ts struct {

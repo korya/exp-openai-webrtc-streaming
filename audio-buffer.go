@@ -17,20 +17,15 @@ type audioBuffer struct {
 	highWater int // When to start dropping data
 }
 
-func newAudioBuffer() *audioBuffer {
-	const (
-		// 48000 samples/sec * 2 channels * 2 bytes/sample = 192000 bytes/sec
-		bytesPerSecond = 48000 * 2 * 2
-
-		// Buffer capacity (500 ms)
-		bufferCapacity = bytesPerSecond / 2
-
-		// Low water mark (50ms)
-		lowWaterMark = bytesPerSecond / 20
-
-		// High water mark (400ms)
-		highWaterMark = (bufferCapacity * 4) / 5
-	)
+func newAudioBuffer(sampleRate, channels int) *audioBuffer {
+	// 48000 samples/sec * 2 channels * 2 bytes/sample = 192000 bytes/sec
+	bytesPerSecond := sampleRate * channels * 2
+	// Buffer capacity (500 ms)
+	bufferCapacity := bytesPerSecond / 2
+	// Low water mark (50ms)
+	lowWaterMark := bytesPerSecond / 20
+	// High water mark (400ms)
+	highWaterMark := (bufferCapacity * 4) / 5
 
 	b := &audioBuffer{
 		capacity:  bufferCapacity,
