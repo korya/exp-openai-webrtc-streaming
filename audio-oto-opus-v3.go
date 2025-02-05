@@ -65,6 +65,10 @@ func (ap *OpusV3AudioPlayer) WriteWebRTCTrack(track *webrtc.TrackRemote) error {
 			return fmt.Errorf("failed to read RTP packet: %w", err)
 		}
 
+		for i := 0; i < len(pcmBuf); i++ {
+			pcmBuf[i] = 0
+		}
+
 		ap.mutex.Lock()
 		// Decode Opus data to PCM
 		bandwidth, _, err := decoder.Decode(p.Payload, pcmBuf)

@@ -10,6 +10,7 @@ import (
 
 func main() {
 	// old_main()
+	testMicrophoneRecording()
 
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {

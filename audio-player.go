@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	sampleRate = 48_000 // 24kHz
+	sampleRate = 24_000 // 24kHz
 	channels   = 2      // stereo
 )
 
@@ -163,8 +163,8 @@ func (ap *OpusV2AudioPlayer) WriteWebRTCTrack(track *webrtc.TrackRemote) error {
 		return fmt.Errorf("unsupported codec: %s", codec.MimeType)
 	}
 
-	sampleRate := int(codec.ClockRate)
-	channels := int(codec.Channels)
+	// sampleRate := int(codec.ClockRate)
+	// channels := int(codec.Channels)
 	decoder, err := opusv2.NewDecoder(sampleRate, channels)
 	if err != nil {
 		return fmt.Errorf("failed to create opus decoder: %w", err)

@@ -168,7 +168,6 @@ func main() {
 				SourceBitDepth: 16,
 				Data:           intBuf,
 			}
-
 			if err := enc.Write(audioBuf); err != nil {
 				log.Printf("Error writing WAV data: %v", err)
 				return
